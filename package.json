@@ -1,0 +1,25 @@
+{
+  "name": "corrector",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A Socratic, personalised DSA coach that lives beside your coding session.",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @corrector/extension",
+    "dev": "npm run dev -w @corrector/extension",
+    "icons": "node scripts/generate-icons.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "npm run typecheck -w @corrector/core && npm run typecheck -w @corrector/extension",
+    "verify": "npm run typecheck && npm test && npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "Corrector — Socratic DSA Coach",
+  "short_name": "Corrector",
+  "version": "0.1.0",
+  "description": "A Socratic, personalised DSA coach that asks the next question instead of handing over the answer.",
+  "minimum_chrome_version": "116",
+  "permissions": ["sidePanel", "activeTab"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Open Corrector"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "commands": {
+    "open-side-panel": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y",
+        "mac": "Command+Shift+Y"
+      },
+      "description": "Open the Corrector side panel"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

@@ -1,0 +1,29 @@
+# dependencies
+node_modules/
+
+# builds
+dist/
+coverage/
+*.tsbuildinfo
+
+# environment
+.env
+.env.*
+!.env.example
+
+# model + training artefacts
+models/
+training/out/
+training/data/*.jsonl
+!training/data/.gitkeep
+
+# editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.local
+
+# logs
+*.log
+npm-debug.log*
