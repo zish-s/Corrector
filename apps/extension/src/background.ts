@@ -21,36 +21,59 @@ function isCaptureRequest(message: unknown): message is CaptureRequest {
   );
 }
 
-async function openSidePanel(): Promise<void> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const windowId = tab?.windowId;
+function friendlyCaptureError(error: string): string {
+  if (/all_urls|activeTab|permission/i.test(error)) {
+    return "Chrome did not grant access to this tab. Open the coding page, click the Corrector toolbar icon on that tab, then press Read this screen again.";
+  }
+  return error;
+}
 
-  if (typeof windowId === "number") {
-    try {
-      await chrome.sidePanel.open({ windowId });
+async function openSidePanel(tab?: chrome.tabs.Tab): Promise<void> {
+  const target =
+    tab ?? (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
+
+  try {
+    // Prefer a tab-scoped panel. Opening it from the action click is the
+    // user gesture that grants activeTab for the screenshot.
+    if (typeof target?.id === "number") {
+      await chrome.sidePanel.open({ tabId: target.id });
       return;
-    } catch (error) {
-      console.warn("Corrector: sidePanel.open failed; opening a tab instead.", error);
     }
+    if (typeof target?.windowId === "number") {
+      await chrome.sidePanel.open({ windowId: target.windowId });
+      return;
+    }
+  } catch (error) {
+    console.warn("Corrector: sidePanel.open failed; opening a tab instead.", error);
   }
 
   await chrome.tabs.create({ url: chrome.runtime.getURL("sidepanel.html") });
 }
 
-async function enableActionClick(): Promise<void> {
+async function disableAutomaticPanelOpening(): Promise<void> {
   try {
-    await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+    // The built-in action-click behavior opens the panel but does not reliably
+    // grant activeTab. Handle the click ourselves instead.
+    await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false });
   } catch (error) {
-    console.warn("Corrector: could not enable action-click opening.", error);
+    console.warn("Corrector: could not set the panel behavior.", error);
   }
 }
 
+// Also run at worker startup so an older install that enabled the automatic
+// action behavior is corrected before the next click.
+void disableAutomaticPanelOpening();
+
 chrome.runtime.onInstalled.addListener(() => {
-  void enableActionClick();
+  void disableAutomaticPanelOpening();
 });
 
 chrome.runtime.onStartup.addListener(() => {
-  void enableActionClick();
+  void disableAutomaticPanelOpening();
+});
+
+chrome.action.onClicked.addListener((tab) => {
+  void openSidePanel(tab);
 });
 
 chrome.commands.onCommand.addListener((command) => {
@@ -75,7 +98,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (error || !dataUrl) {
       sendResponse({
         ok: false,
-        error: error ?? "Chrome did not return a screenshot for this tab.",
+        error: friendlyCaptureError(
+          error ?? "Chrome did not return a screenshot for this tab.",
+        ),
       });
       return;
     }

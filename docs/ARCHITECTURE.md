@@ -140,7 +140,7 @@ flowchart TB
     P --> S[("IndexedDB (M7)")]
 ```
 
-- **Side panel:** the only long-lived UI. It owns the session state and the profile.
+- **Side panel:** the only long-lived UI. It owns the session state and the profile. It is opened from our `chrome.action.onClicked` handler with `sidePanel.open`, not the built-in `openPanelOnActionClick` behavior: the action click is the user gesture that grants `activeTab` for the screenshot.
 - **Service worker:** ephemeral. It must not rely on globals; store session data in `chrome.storage.session` or the panel. It returns `true` from async `onMessage` handlers.
 - **Injected overlay:** created on demand with `activeTab` + `scripting`; it runs in the isolated world but shares the DOM. It draws in a Shadow DOM host. It is idempotent and cleans up on `Esc`/`×` and navigation.
 - **No persistent content script in M1.** We do not request `<all_urls>`. When we add site adapters, we still prefer on-demand injection.

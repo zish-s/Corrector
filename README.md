@@ -59,6 +59,18 @@ The shortcut can be changed at `chrome://extensions/shortcuts`.
 
 `npm run dev` rebuilds the extension on change. Reload the extension card in `chrome://extensions` after each rebuild.
 
+### “Could not read this tab”
+
+`activeTab` is temporary. It is granted when you click the Corrector toolbar icon **on the coding tab**, and Chrome revokes it when that tab reloads or navigates.
+
+If you see “Chrome did not grant access to this tab”:
+
+1. Open the normal `http(s)` coding page you want to capture.
+2. Click the Corrector toolbar icon on that tab. Do not open the side panel from Chrome’s side-panel menu, and do not switch tabs after clicking.
+3. Press **Read this screen** again.
+
+After a rebuild, reload the extension card before testing. `chrome://`, the New Tab page, and the Chrome Web Store cannot be captured.
+
 ## Verify
 
 ```bash
