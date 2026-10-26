@@ -30,6 +30,9 @@ export default defineConfig({
       "@corrector/core": fileURLToPath(
         new URL("../../packages/core/src/index.ts", import.meta.url),
       ),
+      "@corrector/overlay": fileURLToPath(
+        new URL("../../packages/overlay/src/index.ts", import.meta.url),
+      ),
     },
   },
   server: {

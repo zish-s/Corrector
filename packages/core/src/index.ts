@@ -5,3 +5,4 @@ export * from "./ladder.js";
 export * from "./profile.js";
 export * from "./prompts.js";
 export * from "./demo.js";
+export * from "./live.js";

@@ -1,12 +1,16 @@
 export interface AnnotationPayload {
   /** Text to find on the page. The smallest visible element containing it wins. */
   anchorText: string;
+  /** 1-based editor line. Used first when the page exposes Monaco/CodeMirror/Ace. */
+  line?: number;
   /** Short Socratic question shown in the note. */
   note: string;
   /** Small label above the note. */
   tag?: string;
   /** Pen colour. */
   accent?: string;
+  /** Optional small animated explainer inside the note. */
+  visual?: "window" | "hashmap" | "stack" | "pointer";
 }
 
 export interface AnnotationResult {
@@ -41,6 +45,55 @@ export function showAnnotation(payload: AnnotationPayload): AnnotationResult {
 
   function findAnchor(text: string): HTMLElement | null {
     const needle = text.trim();
+    const normalizedNeedle = needle.replace(/\s+/g, " ");
+
+    function visible(element: HTMLElement): boolean {
+      const rect = element.getBoundingClientRect();
+      if (rect.width < 4 || rect.height < 4) return false;
+      if (rect.bottom < 0 || rect.top > window.innerHeight) return false;
+      if (rect.right < 0 || rect.left > window.innerWidth) return false;
+      const style = getComputedStyle(element);
+      return (
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        style.opacity !== "0"
+      );
+    }
+
+    function contains(element: HTMLElement): boolean {
+      const content = element.textContent;
+      if (!content) return false;
+      return (
+        content.includes(needle) ||
+        content.replace(/\s+/g, " ").includes(normalizedNeedle)
+      );
+    }
+
+    if (typeof payload.line === "number" && payload.line > 0) {
+      // Do not require the line to be on screen here: a small viewport or a
+      // not-yet-painted Monaco can make the whole editor look visible while the
+      // line is below the fold. The update loop hides the note when off screen.
+      const editorLines = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          ".monaco-editor .view-line, .cm-line, .ace_line",
+        ),
+      );
+      const lineNode = editorLines[payload.line - 1];
+      if (lineNode) {
+        if (!needle || contains(lineNode)) {
+          const pieces = needle
+            ? Array.from(lineNode.querySelectorAll<HTMLElement>("span")).filter(
+                (element) => contains(element) && visible(element),
+              )
+            : [];
+          const bestPiece = pieces.sort(
+            (a, b) => (a.textContent?.length ?? 0) - (b.textContent?.length ?? 0),
+          )[0];
+          return bestPiece ?? lineNode;
+        }
+      }
+    }
+
     if (!needle) return null;
 
     const nodes = Array.from(
@@ -51,22 +104,8 @@ export function showAnnotation(payload: AnnotationPayload): AnnotationResult {
 
     for (const element of nodes) {
       if (element.id === HOST_ID) continue;
-      const content = element.textContent;
-      if (!content || !content.includes(needle)) continue;
-
-      const rect = element.getBoundingClientRect();
-      if (rect.width < 4 || rect.height < 4) continue;
-      if (rect.bottom < 0 || rect.top > window.innerHeight) continue;
-      if (rect.right < 0 || rect.left > window.innerWidth) continue;
-
-      const style = getComputedStyle(element);
-      if (
-        style.display === "none" ||
-        style.visibility === "hidden" ||
-        style.opacity === "0"
-      ) {
-        continue;
-      }
+      if (!contains(element) || !visible(element)) continue;
+      const content = element.textContent ?? "";
 
       const inEditor = element.closest(
         "[class*='monaco'], [class*='cm-editor'], [class*='ace_editor'], pre, code",
@@ -189,6 +228,30 @@ export function showAnnotation(payload: AnnotationPayload): AnnotationResult {
       font-size: 9px;
       line-height: 1.3;
     }
+    .mini {
+      margin: 2px 0 8px;
+      padding: 5px 6px;
+      border: 1px solid ${accent}22;
+      border-radius: 9px;
+      background: ${accent}08;
+    }
+    .mini svg { display: block; width: 100%; height: 42px; overflow: visible; }
+    .mini text {
+      fill: #6b4a45;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 8px;
+    }
+    .mini rect.cell { fill: #fff8e9; stroke: ${accent}55; stroke-width: 1; }
+    .mini rect.hot { fill: ${accent}1c; stroke: ${accent}; }
+    .mini g.mover { animation: mini-slide 2.6s ease-in-out infinite alternate; }
+    .mini rect.map { animation: mini-pulse 1.4s ease-in-out infinite; }
+    .mini g.stackbox { animation: mini-pop 2.4s ease-in-out infinite; }
+    @keyframes mini-slide { from { transform: translateX(0); } to { transform: translateX(96px); } }
+    @keyframes mini-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+    @keyframes mini-pop { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+    @media (prefers-reduced-motion: reduce) {
+      .mini g.mover, .mini rect.map, .mini g.stackbox { animation: none; }
+    }
     @keyframes corrector-pop {
       from { opacity: 0; transform: scale(0.94) rotate(-1.4deg); }
       to { opacity: 1; transform: scale(1) rotate(-1.4deg); }
@@ -245,7 +308,32 @@ export function showAnnotation(payload: AnnotationPayload): AnnotationResult {
   foot.className = "foot";
   foot.textContent = "Esc to dismiss";
 
-  note.append(tagElement, close, text, foot);
+  let visualBox: HTMLDivElement | null = null;
+  if (payload.visual) {
+    visualBox = document.createElement("div");
+    visualBox.className = "mini";
+    visualBox.setAttribute("aria-hidden", "true");
+    const cells = Array.from({ length: 7 }, (_, index) => {
+      const x = 4 + index * 16;
+      const hot = payload.visual === "hashmap" && (index === 2 || index === 5);
+      return `<rect class="cell${hot ? " hot" : ""}" x="${x}" y="12" width="13" height="18" rx="3"/>`;
+    }).join("");
+    let scene = "";
+    if (payload.visual === "window") {
+      scene = `${cells}<g class="mover"><rect x="4" y="8" width="43" height="26" rx="5" fill="none" stroke="${accent}" stroke-width="1.6" stroke-dasharray="3 2"/><path d="M8 38 L8 42 L43 42 L43 38" fill="none" stroke="${accent}" stroke-width="1.4"/></g>`;
+    } else if (payload.visual === "hashmap") {
+      scene = `${cells}<path d="M116 21 H136" stroke="${accent}" stroke-width="1.2" stroke-dasharray="3 2"/><rect class="map" x="138" y="7" width="38" height="28" rx="5" fill="none" stroke="${accent}" stroke-width="1.5"/><text x="145" y="25">key → i</text>`;
+    } else if (payload.visual === "stack") {
+      scene = `<g class="stackbox"><rect class="cell" x="42" y="24" width="46" height="13" rx="3"/><text x="49" y="34">push</text></g><g class="stackbox" style="animation-delay:0.35s"><rect class="cell" x="46" y="10" width="46" height="13" rx="3"/><text x="53" y="20">pop</text></g>`;
+    } else {
+      scene = `${cells}<g class="mover"><path d="M8 42 L8 34 L18 34" fill="none" stroke="${accent}" stroke-width="1.8" stroke-linecap="round"/><path d="M14 30 L19 34 L14 38" fill="none" stroke="${accent}" stroke-width="1.8" stroke-linecap="round"/></g>`;
+    }
+    visualBox.innerHTML = `<svg viewBox="0 0 180 46" role="img">${scene}</svg>`;
+  }
+
+  note.append(tagElement, close);
+  if (visualBox) note.append(visualBox);
+  note.append(text, foot);
   shadow.append(style, svg, highlight, note);
   document.documentElement.append(host);
 

@@ -1,0 +1,27 @@
+{
+  "name": "@corrector/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Corrector practice website with Monaco and live Socratic notes",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5173",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4173",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@corrector/core": "0.1.0",
+    "@corrector/overlay": "0.1.0",
+    "monaco-editor": "^0.55.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "vite": "^8.3.5"
+  }
+}

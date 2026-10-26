@@ -2,7 +2,10 @@
 
 Corrector is a browser extension, not a desktop app. The extension is the thin, private edge; the models and the runner are swappable services behind it.
 
-This document describes the target architecture and marks what M1 actually implements.
+This document describes the target architecture and marks what the M2–M4 prototype
+actually implements. The current build has the practice studio, live page reader, shared
+overlay, static verdict, and Gemma 4 intake; the reasoning model, runner, persistence, and
+voice audio model are still target architecture.
 
 ## System picture
 

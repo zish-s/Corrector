@@ -1,6 +1,7 @@
 # Milestone 1 — the Socratic loop, end to end in a local slice
 
-**Status: ready for review.**
+**Status: historical milestone record.** The current working prototype is documented in
+[PROTOTYPE.md](PROTOTYPE.md). This page preserves the M1 scope and acceptance notes.
 
 ![The on-page red-pen note anchored to MaxLen](assets/overlay-demo.png)
 

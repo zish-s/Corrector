@@ -10,12 +10,15 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w @corrector/extension",
+    "build": "npm run build -w @corrector/extension && npm run build -w @corrector/web",
+    "build:extension": "npm run build -w @corrector/extension",
+    "build:web": "npm run build -w @corrector/web",
     "dev": "npm run dev -w @corrector/extension",
+    "dev:web": "npm run dev -w @corrector/web",
     "icons": "node scripts/generate-icons.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "npm run typecheck -w @corrector/core && npm run typecheck -w @corrector/extension",
+    "typecheck": "npm run typecheck -w @corrector/core && npm run typecheck -w @corrector/overlay && npm run typecheck -w @corrector/extension && npm run typecheck -w @corrector/web",
     "verify": "npm run typecheck && npm test && npm run build"
   },
   "devDependencies": {

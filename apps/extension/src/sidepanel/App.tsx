@@ -5,6 +5,7 @@ import {
   advanceLadder,
   averageHints,
   buildFallbackQuestion,
+  buildLiveHint,
   checkHint,
   clearTopicOverride,
   createDemoProfile,
@@ -22,6 +23,8 @@ import {
   type LadderState,
   type LearnerProfile,
   type Level,
+  type LiveHint,
+  type PageContext,
   type QuestionType,
 } from "@corrector/core";
 import {
@@ -33,6 +36,12 @@ import {
   RUNG_LABEL,
   RichText,
 } from "./components";
+import {
+  IntakeCard,
+  LiveView,
+  type IntakeResult,
+  type IntakeState,
+} from "./LivePanels";
 
 const TOPIC = "arrays";
 const FACTS = TWO_SUM_SCENARIO.facts;
@@ -49,7 +58,19 @@ const ANSWER_OPTIONS: ReadonlyArray<{ kind: AnswerKind; label: string; sub: stri
   { kind: "dont_know", label: "I don't know", sub: "Give me a smaller one" },
 ];
 
-type Mode = "idle" | "session";
+type Mode = "idle" | "session" | "live";
+
+interface ReadPageResponse {
+  ok: boolean;
+  page?: PageContext;
+  error?: string;
+}
+
+interface IntakeResponse {
+  ok: boolean;
+  result?: IntakeResult;
+  error?: string;
+}
 
 type CaptureState =
   | { status: "idle" }
@@ -90,6 +111,13 @@ export default function App() {
   const [mode, setMode] = useState<Mode>("idle");
   const [capture, setCapture] = useState<CaptureState>({ status: "idle" });
   const [verdictVisible, setVerdictVisible] = useState(false);
+  const [livePage, setLivePage] = useState<PageContext | null>(null);
+  const [liveHint, setLiveHint] = useState<LiveHint | null>(null);
+  const [liveLadder, setLiveLadder] = useState<LadderState | null>(null);
+  const [liveNotice, setLiveNotice] = useState<string | null>(null);
+  const [readingPage, setReadingPage] = useState(false);
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [intake, setIntake] = useState<IntakeState>({ status: "idle" });
 
   const { ladder, draft } = session;
   const lastAnswer = session.answers[session.answers.length - 1];
@@ -148,10 +176,195 @@ export default function App() {
     }
   }
 
+  async function handleReadPage() {
+    setReadingPage(true);
+    setPageError(null);
+    setLiveNotice(null);
+    try {
+      if (typeof chrome === "undefined") {
+        throw new Error("Live page reading is available only inside the installed extension.");
+      }
+      const response = (await chrome.runtime.sendMessage({
+        type: "corrector:read-page",
+      })) as ReadPageResponse;
+      if (!response?.ok || !response.page) {
+        setPageError(response?.error ?? "Corrector could not read code from this page.");
+        return;
+      }
+
+      const nextLadder = startLadder(level);
+      const hint = buildLiveHint({
+        page: response.page,
+        level,
+        rung: nextLadder.rung,
+        askedQuestions: [],
+      });
+      setLivePage(response.page);
+      setLiveLadder(nextLadder);
+      setLiveHint(hint);
+      setMode("live");
+      setVerdictVisible(false);
+      setNotice(null);
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : "Could not read this page.");
+    } finally {
+      setReadingPage(false);
+    }
+  }
+
+  async function handleGemmaIntake() {
+    if (capture.status !== "ready") {
+      setIntake({ status: "error", error: "Capture the screen first, then ask Gemma to read it." });
+      return;
+    }
+    setIntake({ status: "reading" });
+    try {
+      if (typeof chrome === "undefined") throw new Error("Open the installed extension first.");
+      const response = (await chrome.runtime.sendMessage({
+        type: "corrector:gemma-intake",
+        imageDataUrl: capture.dataUrl,
+        spokenQuestion:
+          "Read this coding screen and extract the problem, language, code, and the exact line I should look at. Do not solve it.",
+      })) as IntakeResponse;
+      if (!response?.ok || !response.result) {
+        setIntake({
+          status: "error",
+          error: response?.error ?? "Gemma did not return structured intake.",
+        });
+        return;
+      }
+      setIntake({ status: "ready", result: response.result });
+    } catch (error) {
+      setIntake({
+        status: "error",
+        error: error instanceof Error ? error.message : "Gemma intake failed.",
+      });
+    }
+  }
+
+  function handleUseExtractedCode(result: IntakeResult) {
+    if (!result.code?.trim()) return;
+    const page: PageContext = {
+      title: result.title ?? "Gemma intake",
+      language: result.language ?? "text",
+      code: result.code,
+      statement: result.problemStatement,
+      source: "gemma-intake",
+      lineCount: result.code.split("\n").length,
+    };
+    const nextLadder = startLadder(level);
+    const hint = buildLiveHint({
+      page,
+      level,
+      rung: nextLadder.rung,
+      askedQuestions: [],
+    });
+    if (result.anchor?.text) {
+      hint.anchor = {
+        text: result.anchor.text,
+        line: result.anchor.line,
+      };
+    }
+    setLivePage(page);
+    setLiveLadder(nextLadder);
+    setLiveHint(hint);
+    setMode("live");
+    setLiveNotice(
+      "Gemma extracted this page. The question below comes from the local Socratic engine.",
+    );
+  }
+
+  async function handleLiveShowNote() {
+    if (!liveHint) return;
+    try {
+      const response = (await chrome.runtime.sendMessage({
+        type: "corrector:show-annotation",
+        payload: {
+          anchorText: liveHint.anchor.text,
+          line: liveHint.anchor.line,
+          note: liveHint.note,
+          tag: liveHint.tag,
+          accent: "#e5484d",
+          visual: liveHint.visual,
+        },
+      })) as { ok: boolean; error?: string };
+      setLiveNotice(response?.ok ? "Note placed on the page. Esc dismisses it." : response?.error ?? "Could not place the note.");
+    } catch (error) {
+      setLiveNotice(error instanceof Error ? error.message : "Could not place the note.");
+    }
+  }
+
+  function handleLiveAskAgain() {
+    if (!livePage || !liveHint || !liveLadder) return;
+    const withAsked = rememberQuestion(liveLadder, liveHint.draft.text);
+    const nextLadder = {
+      ...withAsked,
+      hintsUsed: withAsked.hintsUsed + 1,
+    };
+    const next = buildLiveHint({
+      page: livePage,
+      level,
+      rung: withAsked.rung,
+      askedQuestions: withAsked.askedQuestions,
+      explicitSolutionRequest: withAsked.solutionRevealed,
+    });
+    setLiveLadder(nextLadder);
+    setLiveHint(next);
+    setLiveNotice(null);
+  }
+
+  function handleLiveDontKnow() {
+    if (!livePage || !liveHint || !liveLadder) return;
+    const withAsked = rememberQuestion(liveLadder, liveHint.draft.text);
+    const result = recordAnswer(withAsked, "dont_know");
+    const direct = result.move === "explain_directly";
+    const next = buildLiveHint({
+      page: livePage,
+      level: direct && level === "advanced" ? "intermediate" : level,
+      rung: direct ? "concept" : result.rung,
+      askedQuestions: result.state.askedQuestions,
+      explicitSolutionRequest: false,
+    });
+    setLiveLadder(result.state);
+    setLiveHint(next);
+    setLiveNotice(
+      direct
+        ? "Two “I don’t know” answers on the same point: here is the explanation, then one check question."
+        : "One rung more explicit. The question changed so it is not repeated.",
+    );
+  }
+
+  function handleLiveJustTell() {
+    if (!livePage || !liveHint || !liveLadder) return;
+    const withAsked = rememberQuestion(liveLadder, liveHint.draft.text);
+    const result = advanceLadder(withAsked, { escapeHatch: true });
+    if (!result.changed) {
+      setLiveNotice("The ladder is already at its last rung.");
+      return;
+    }
+    const next = buildLiveHint({
+      page: livePage,
+      level,
+      rung: result.state.rung,
+      askedQuestions: result.state.askedQuestions,
+      explicitSolutionRequest: result.state.solutionRevealed,
+    });
+    setLiveLadder(result.state);
+    setLiveHint(next);
+    setLiveNotice(
+      result.state.rung === "solution"
+        ? "Full solution revealed after your explicit ask. It still ends with a question."
+        : "One rung more explicit. That counts as a hint.",
+    );
+  }
+
   function handleStartDemo() {
     setMode("session");
     setVerdictVisible(false);
     setNotice(null);
+    setLivePage(null);
+    setLiveHint(null);
+    setLiveLadder(null);
     setSession(createSession(level));
   }
 
@@ -160,6 +373,12 @@ export default function App() {
     setCapture({ status: "idle" });
     setVerdictVisible(false);
     setNotice(null);
+    setLivePage(null);
+    setLiveHint(null);
+    setLiveLadder(null);
+    setLiveNotice(null);
+    setPageError(null);
+    setIntake({ status: "idle" });
     setSession(createSession(level));
   }
 
@@ -269,6 +488,12 @@ export default function App() {
     setMode("idle");
     setCapture({ status: "idle" });
     setVerdictVisible(false);
+    setLivePage(null);
+    setLiveHint(null);
+    setLiveLadder(null);
+    setLiveNotice(null);
+    setPageError(null);
+    setIntake({ status: "idle" });
   }
 
   const advanceLabel = ladder.solutionRevealed
@@ -295,23 +520,24 @@ export default function App() {
           </div>
         </div>
         <span className="pill">
-          <span className="dot" aria-hidden="true" /> local demo
+          <span className="dot" aria-hidden="true" /> live prototype
         </span>
       </header>
 
       <p className="lede">
-        Stay in your editor. When you are stuck, Corrector reads the screen and asks one
-        grounded question at a time.
+        Stay in your editor. Corrector reads the code on the page, points at one line, and
+        asks one grounded question at a time. Gemma 4 intake is opt-in.
       </p>
 
       <main>
         {mode === "idle" ? (
           <section className="start-card" aria-labelledby="start-title">
-            <span className="eyebrow">Start from your screen</span>
+            <span className="eyebrow">Start from the live page</span>
             <h2 id="start-title">Stuck halfway through an approach?</h2>
             <p className="start-copy">
-              Open Corrector on the tab where you are solving. It reads what is already on
-              screen instead of asking you to paste your code.
+              Open the practice studio or a coding tab, click Corrector on that tab, then
+              read the code. Nothing is pasted and nothing is uploaded unless you choose
+              Gemma intake.
             </p>
 
             <ol className="loop-steps">
@@ -338,6 +564,17 @@ export default function App() {
               </li>
             </ol>
 
+            {pageError && (
+              <div className="capture-error" role="alert">
+                <b>Could not read the code on this page.</b>
+                <p>{pageError}</p>
+                <p>
+                  The practice studio exposes its editor directly. On other sites, use a
+                  visible Monaco/CodeMirror editor and invoke Corrector from that tab.
+                </p>
+              </div>
+            )}
+
             {capture.status === "ready" && (
               <>
                 <div className="screen-frame">
@@ -349,12 +586,14 @@ export default function App() {
                 </div>
                 <p className="capture-note">
                   Captured {new Date(capture.capturedAt).toLocaleTimeString()} ·{" "}
-                  {Math.round(capture.dataUrl.length / 1024)} KB · not uploaded.
+                  {Math.round(capture.dataUrl.length / 1024)} KB · still local until you
+                  press Gemma intake.
                 </p>
-                <p className="capture-note">
-                  This is the exact input Gemma turns into problem, code, and error JSON in
-                  Milestone 4. For now the demo problem shows the hint loop.
-                </p>
+                <IntakeCard
+                  state={intake}
+                  onRead={() => void handleGemmaIntake()}
+                  onUseCode={handleUseExtractedCode}
+                />
               </>
             )}
 
@@ -374,8 +613,8 @@ export default function App() {
               {capture.status === "ready" ? (
                 <>
                   <button className="primary-button" type="button" onClick={handleStartDemo}>
-                    <b>Open the Socratic loop</b>
-                    <span>demo problem · Milestone 1</span>
+                    <b>Open the local Socratic demo</b>
+                    <span>Two Sum · no network</span>
                   </button>
                   <button className="link-button" type="button" onClick={handleCapture}>
                     capture again
@@ -386,13 +625,20 @@ export default function App() {
                   <button
                     className="primary-button"
                     type="button"
+                    onClick={() => void handleReadPage()}
+                    disabled={readingPage}
+                  >
+                    <b>{readingPage ? "Reading the code…" : "Read the code on this page"}</b>
+                    <span>live anchor · practice studio or supported editor</span>
+                  </button>
+                  <button
+                    className="secondary-button"
+                    type="button"
                     onClick={handleCapture}
                     disabled={capture.status === "capturing"}
                   >
-                    <b>
-                      {capture.status === "capturing" ? "Reading the tab…" : "Read this screen"}
-                    </b>
-                    <span>capture the active tab locally</span>
+                    {capture.status === "capturing" ? "Capturing…" : "Read this screen instead"}
+                    <span>for Gemma 4 intake</span>
                   </button>
                   <button className="link-button" type="button" onClick={handleStartDemo}>
                     try the demo problem first
@@ -401,19 +647,45 @@ export default function App() {
               )}
             </div>
 
+            <div className="start-links">
+              <a
+                className="overlay-link"
+                href="http://localhost:5173"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open the practice studio →
+              </a>
+              <a
+                className="overlay-link"
+                href="overlay-demo.html"
+                target="_blank"
+                rel="noreferrer"
+              >
+                See the note style →
+              </a>
+            </div>
+
             <p className="capture-note">
-              Chrome grants access only to the tab you invoked Corrector on. In Milestone 1
-              the screenshot stays in this panel; Gemma intake is Milestone 4.
+              Chrome grants access only to the tab you invoked Corrector on. Page reads use
+              `activeTab` + `scripting`; screenshots stay in this panel until you press the
+              Gemma intake button.
             </p>
-            <a
-              className="overlay-link"
-              href="overlay-demo.html"
-              target="_blank"
-              rel="noreferrer"
-            >
-              See the hand-drawn on-page note style →
-            </a>
           </section>
+        ) : mode === "live" && livePage && liveHint && liveLadder ? (
+          <LiveView
+            page={livePage}
+            hint={liveHint}
+            ladder={liveLadder}
+            level={level}
+            notice={liveNotice}
+            onShowNote={() => void handleLiveShowNote()}
+            onDontKnow={handleLiveDontKnow}
+            onJustTell={handleLiveJustTell}
+            onAskAgain={handleLiveAskAgain}
+            onReadAgain={() => void handleReadPage()}
+            onBack={handleNewSession}
+          />
         ) : (
           <>
             <ProfileCard
@@ -540,21 +812,22 @@ export default function App() {
       </main>
 
       <footer>
-        <span>Milestone 1 · local demo</span>
+        <span>M3–M4 · live prototype</span>
         <span className="footer-actions">
-          {mode === "session" && (
+          {(mode === "session" || mode === "live") && (
             <button className="link-button" type="button" onClick={handleNewSession}>
               new session
             </button>
           )}
           <button className="link-button" type="button" onClick={handleReset}>
-            reset demo
+            reset
           </button>
         </span>
         <p>
-          No network calls. Screenshots stay in this panel. Only the{" "}
-          <code>sidePanel</code> and <code>activeTab</code> permissions are requested; page
-          access ends when the tab is navigated.
+          <code>sidePanel</code>, <code>activeTab</code>, and <code>scripting</code> are
+          requested. Page access starts only when you invoke Corrector on a tab. Screenshots
+          stay in the panel until you press Gemma intake; only then is one image sent to your
+          backend. The model key lives on the backend, never in the extension.
         </p>
       </footer>
     </div>

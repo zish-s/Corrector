@@ -219,6 +219,20 @@ interface RichTextProps {
   text: string;
 }
 
+function InlineCode({ text }: { text: string }) {
+  return (
+    <>
+      {text.split(/(`[^`\n]+`)/g).map((part, index) =>
+        part.startsWith("`") && part.endsWith("`") ? (
+          <code key={`inline-${index}`}>{part.slice(1, -1)}</code>
+        ) : (
+          <span key={`text-${index}`}>{part}</span>
+        ),
+      )}
+    </>
+  );
+}
+
 /** Minimal renderer for prose + fenced code. The model never returns raw HTML. */
 export function RichText({ text }: RichTextProps) {
   const parts = text.split(/(```[\s\S]*?```)/g);
@@ -240,7 +254,9 @@ export function RichText({ text }: RichTextProps) {
           .split(/\n{2,}/)
           .filter(Boolean)
           .map((paragraph, paragraphIndex) => (
-            <p key={`p-${index}-${paragraphIndex}`}>{paragraph}</p>
+            <p key={`p-${index}-${paragraphIndex}`}>
+              <InlineCode text={paragraph} />
+            </p>
           ));
       })}
     </div>

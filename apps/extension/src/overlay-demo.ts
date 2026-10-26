@@ -1,5 +1,5 @@
 import "./overlay-demo.css";
-import { showAnnotation } from "./overlay/annotation";
+import { showAnnotation } from "@corrector/overlay";
 
 const root = document.querySelector<HTMLDivElement>("#root");
 if (!root) throw new Error("overlay demo root missing");

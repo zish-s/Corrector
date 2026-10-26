@@ -5,7 +5,11 @@
   "version": "0.1.0",
   "description": "A Socratic, personalised DSA coach that asks the next question instead of handing over the answer.",
   "minimum_chrome_version": "116",
-  "permissions": ["sidePanel", "activeTab"],
+  "permissions": ["sidePanel", "activeTab", "scripting"],
+  "host_permissions": [
+    "http://localhost:8787/*",
+    "http://127.0.0.1:8787/*"
+  ],
   "background": {
     "service_worker": "background.js",
     "type": "module"
